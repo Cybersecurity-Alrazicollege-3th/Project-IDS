@@ -1,135 +1,102 @@
-# Project-IDS
+#Project-IDS
 
-#!/bin/bash
-# نظام كشف التسلل البسيط باستخدام Bash
-# هذا السكربت يقدم وظائف مراقبة أساسية جداً (وجود ملف، أسماء عمليات).
-# لا يمثل بديلاً كاملاً لنسخة Python الأكثر تقدماً.
+# 🛡️ Bash Intrusion Detection System (Simple IDS)
 
-# مسار ملف الإعدادات
-CONFIG_FILE="./ids_config.sh"
+## 🔍 Overview
 
-# التحقق من وجود ملف الإعدادات واستدعائه (sourcing)
-if [ -f "$CONFIG_FILE" ]; then
-    source "$CONFIG_FILE"
-else
-    echo "خطأ: ملف الإعدادات '$CONFIG_FILE' غير موجود."
-    exit 1
-fi
+This is a **lightweight, host-based intrusion detection system (HIDS)** written in Bash.  
+It provides basic monitoring for:
 
-# التحقق مما إذا كان مسار السجل يحتوي على اسم ملف
-if [ -z "$(basename "$LOG_FILE")" ] || [ "$(basename "$LOG_FILE")" == "." ]; then
-    echo "خطأ: مسار ملف السجل غير صالح. يرجى تحديد اسم ملف في LOG_FILE."
-    exit 1
-fi
+- Critical file existence
+- Suspicious process names
+- Logging and terminal alerts
 
-# التحقق من وجود مجلد السجل وإنشائه إذا لم يكن موجوداً
-LOG_DIR=$(dirname "$LOG_FILE")
-if [ ! -d "$LOG_DIR" ]; then
-    echo "مجلد السجل '$LOG_DIR' غير موجود، جاري الإنشاء..."
-    mkdir -p "$LOG_DIR"
-    # التحقق من نجاح الإنشاء (يتطلب صلاحيات إذا كان المسار يتطلب ذلك مثل /var/log)
-    if [ $? -ne 0 ]; then
-        echo "خطأ: فشل في إنشاء مجلد السجل '$LOG_DIR'. يرجى التحقق من الصلاحيات."
-        exit 1
-    fi
-fi
+⚠️ This script is **not a full replacement** for advanced IDS solutions. It is mainly for learning, small systems, or initial detection needs.
 
-# دالة لتسجيل التنبيهات في ملف السجل وعلى الشاشة
-log_alert() {
-    local type="$1"    # نوع التنبيه (مثال: HIDS_ALERT, SYSTEM_INFO)
-    local source="$2"  # مصدر التنبيه (مثال: FileMonitor, ProcessMonitor)
-    local message="$3" # رسالة التنبيه
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S") # الوقت الحالي
+---
 
-    # تنسيق رسالة السجل
-    log_message="$timestamp - [$type] - [$source] - $message"
+## 📁 Project Structure
 
-    # طباعة الرسالة على الشاشة وحفظها في ملف السجل
-    echo "$log_message" | tee -a "$LOG_FILE"
-    # 'tee -a' يقوم بالطباعة على الشاشة (-a) وإضافة إلى ملف السجل (-a)
-}
+- `bash_ids.sh` → Main IDS script
+- `ids_config.sh` → Configuration file (to be created by the user)
+- `bash_ids.log` → Default log file (location configurable)
 
-# --- HIDS: File Existence Check ---
-check_sensitive_files() {
-    # رسالة معلومات لبدء الفحص - يمكن تعطيل هذه الرسائل المتكررة للسجل النصي إذا كانت مزعجة
-    # log_alert "HIDS_CHECK" "FileMonitor" "بدء فحص وجود الملفات الحساسة."
+---
 
-    # المرور على كل ملف في قائمة SENSITIVE_FILES
-    for file_path in "${SENSITIVE_FILES[@]}"; do
-        # التحقق مما إذا كان الملف غير موجود ('! -f')
-        if [ ! -f "$file_path" ]; then
-            # إذا كان الملف غير موجود، سجل تنبيه
-            log_alert "HIDS_ALERT" "FileMonitor" "لم يتم العثور على ملف حساس (قد يكون محذوفاً أو تمت إعادة تسميته): $file_path"
-        # Note: Bash cannot easily check for modifications or new files in sensitive directories
-        # without complex logic or external tools like inotifywait.
-        fi
-    done
-    # To check for *new* files in sensitive directories, it would require
-    # storing a list of known files and comparing, or using inotifywait.
-    # This simple script only checks if the pre-configured sensitive files *exist*.
-}
+## ⚙️ How It Works
 
-# --- HIDS: Process Name Check ---
-check_suspicious_processes() {
-    # رسالة معلومات لبدء الفحص - يمكن تعطيل هذه الرسائل المتكررة للسجل النصي إذا كانت مزعجة
-    # log_alert "HIDS_CHECK" "ProcessMonitor" "بدء فحص العمليات المشبوهة."
+- Monitors if **sensitive files** (e.g., `/etc/shadow`) exist.
+- Scans running processes for **suspicious names** (e.g., `ncat`, `netcat`, `reverse`).
+- Logs every alert with a timestamp, alert type, source, and message.
+- Runs in a loop with a configurable scan interval.
 
-    # استخدام ps للحصول على قائمة العمليات مع المستخدم والمعرف والأمر
-    # ps -ef هو تنسيق قياسي يسهل قراءته
-    # تخزين الناتج في متغير لتجنب استدعاء ps عدة مرات
-    PS_OUTPUT=$(ps -ef 2>/dev/null) # إعادة توجيه خطأ الصلاحيات إن وجد
+---
 
-    # المرور على كل اسم عملية مشبوهة في القائمة
-    for proc_name in "${SUSPICIOUS_PROCS[@]}"; do
-        # استخدام grep للبحث عن اسم العملية (بحث غير حساس لحالة الأحرف -i)
-        # [${proc_name:0:1}]${proc_name:1} هي حيلة للبحث عن العملية نفسها وتجنب العثور على أمر grep نفسه
-        # awk لاستخراج معلومات المستخدم ($1)، الـ PID ($2)، والأمر كاملاً ($8 فما بعد)
-        # read -r يقرأ كل سطر كإدخال واحد لتجنب تقسيم الأسطور التي تحتوي على مسافات
-        echo "$PS_OUTPUT" | grep -i "[${proc_name:0:1}]${proc_name:1}" | awk '{print "PID:" $2 ", User:" $1 ", Cmd:" substr($0, index($0,$8))}' | while read -r proc_info; do
-            # سجل تنبيه لكل عملية مشبوهة تم العثور عليها
-            # ملاحظة: هذا السكربت لا يتتبع الـ PIDs المسجلة مسبقاً،
-            # لذا قد يسجل نفس التنبيه للعملية نفسها في كل دورة فحص طالما أنها تعمل.
-            log_alert "HIDS_ALERT" "ProcessMonitor" "تم العثور على عملية مشبوهة: $proc_info (الاسم يطابق: $proc_name)"
-        done
-    done
-}
+## 🛠️ Setup
 
-# --- Cleanup Function (Executed on SIGINT) ---
-# دالة سيتم تنفيذها عند استقبال إشارة الإنهاء (مثل Ctrl+C)
-cleanup() {
-    log_alert "SYSTEM_INFO" "BashIDS" "تم استقبال إشارة الإنهاء (Ctrl+C)."
-    log_alert "SYSTEM_INFO" "BashIDS" "جاري إيقاف نظام Bash IDS البسيط."
-    exit 0 # الخروج من السكربت بنجاح
-}
+1. **Clone or copy the script** to your system:
 
-# --- Trap SIGINT signal ---
-# إعداد أمر trap لاستدعاء دالة cleanup عند استقبال SIGINT
-trap 'cleanup' SIGINT
+```bash
+git clone https://github.com/your-username/bash-ids.git
+cd bash-ids
+chmod +x bash_ids.sh
 
-# --- الحلقة الرئيسية للمراقبة ---
+# ids_config.sh
 
-# رسائل بدء النظام
-log_alert "SYSTEM_INFO" "BashIDS" "تم بدء نظام Bash IDS البسيط."
-log_alert "SYSTEM_INFO" "BashIDS" "ملف السجل: $LOG_FILE"
-log_alert "SYSTEM_INFO" "BashIDS" "الفاصل الزمني للفحص: $CHECK_INTERVAL ثانية"
-log_alert "SYSTEM_INFO" "BashIDS" "الملفات الحساسة التي يتم فحص وجودها: ${SENSITIVE_FILES[*]}"
-log_alert "SYSTEM_INFO" "BashIDS" "العمليات المشبوهة التي يتم البحث عنها: ${SUSPICIOUS_PROCS[*]}"
-log_alert "SYSTEM_WARNING" "BashIDS" "هذا الإصدار لا يتضمن مراقبة الشبكة (NIDS) أو واجهة الويب أو قاعدة بيانات."
-log_alert "SYSTEM_INFO" "BashIDS" "اضغط Ctrl+C لإيقاف النظام بشكل آمن." # Updated message
+# Log file path
+LOG_FILE="/var/log/bash_ids.log"
 
-# حلقة لا نهائية لتكرار الفحوصات
-while true; do
-    # استدعاء دالة فحص الملفات
-    check_sensitive_files
+# Scan interval in seconds
+CHECK_INTERVAL=30
 
-    # استدعاء دالة فحص العمليات
-    check_suspicious_processes
+# List of sensitive files to monitor
+SENSITIVE_FILES=(
+    "/etc/passwd"
+    "/etc/shadow"
+    "/usr/bin/sudo"
+)
 
-    # رسالة معلومات قبل فترة الانتظار
-    # log_alert "SYSTEM_INFO" "BashIDS" "النوم لمدة $CHECK_INTERVAL ثواني..." # Optional: uncomment if you want sleep messages in the log
+# Suspicious process names to monitor (case-insensitive)
+SUSPICIOUS_PROCS=(
+    "ncat"
+    "netcat"
+    "reverse"
+    "msfconsole"
+)
 
-    # الانتظار للمدة المحددة
-    sleep "$CHECK_INTERVAL"
-done
+sudo ./bash_ids.sh
 
-# ملاحظة: الدالة cleanup ستتعامل مع الخروج عند الضغط على Ctrl+C.
+2025-05-21 14:12:00 - [SYSTEM_INFO] - [BashIDS] - Log file: /var/log/bash_ids.log
+2025-05-21 14:12:30 - [HIDS_ALERT] - [FileMonitor] - Sensitive file not found: /etc/shadow
+2025-05-21 14:12:31 - [HIDS_ALERT] - [ProcessMonitor] - Suspicious process found: PID:1234, User:root, Cmd: ncat -lvnp 4444 (match: ncat)
+
+🚨 Features
+✅ Modular structure with logging
+
+✅ File and process monitoring
+
+✅ Real-time alerting to console and log
+
+❌ No network traffic monitoring
+
+❌ No historical state tracking (e.g., PID persistence)
+
+❌ No GUI or alerting integrations (email, Slack, etc.)
+
+⚠️ Warnings
+This script does not support advanced behavioral analysis.
+
+Does not persist state across reboots or scans.
+
+For production environments, consider tools like OSSEC, Wazuh, or Snort.
+
+📄 License
+MIT License — use it freely, but at your own risk.
+
+🙏 Acknowledgements
+This tool is inspired by the need for basic, auditable security monitoring using minimal Bash scripting — especially for minimal or embedded Linux systems.
+
+
+---
+
+Let me know if you'd like a translated Arabic version or want to include setup instructions for cron or systemd service.
